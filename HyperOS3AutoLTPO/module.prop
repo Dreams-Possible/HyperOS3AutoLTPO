@@ -1,0 +1,6 @@
+id=HyperOS3AutoLTPO
+name=HyperOS 3 Auto LTPO
+version=1.0.0
+versionCode=2026082301
+author=Dreams-Possible (https://github.com/Dreams-Possible)
+description=允许60Hz和120Hz档运行系统自动刷新率策略

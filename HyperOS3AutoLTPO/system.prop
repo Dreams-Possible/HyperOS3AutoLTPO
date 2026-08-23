@@ -1,0 +1,2 @@
+# 允许60Hz和120Hz档启用系统自动刷新率策略
+ro.vendor.mi_sf.supported_automode_maxfps_list=60,120
