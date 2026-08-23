@@ -29,20 +29,162 @@ Panel build ID：0x90
 
 ## Auto模块
 
-模块通过 `system.prop` 设置：
+该模块负责系统策略层，不负责创建面板模式。完整1–120Hz AUTO物理模式由本仓库提供的实验DTBO实现；模块负责让小米修改版 SurfaceFlinger 使用该模式，并允许用户决定是否保留原厂的场景强制切换。
+
+需要区分两种容易混淆的帧率：
+
+```text
+应用渲染帧率：应用实际生成画面的速度，例如视频通常为24/30fps
+面板物理刷新率：DDIC驱动屏幕扫描的速度，例如AUTO模式可在1–120Hz变化
+```
+
+理想状态下，30fps视频可以继续以30fps渲染，而面板留在AUTO物理模式并自行适配；没有必要仅因为应用以30fps渲染，就把面板切换到普通固定60Hz。
+
+### 公共AUTO配置
+
+两个安装档位都会通过 `system.prop` 设置：
 
 ```properties
 # 允许60Hz和120Hz档启用系统自动刷新率策略
 ro.vendor.mi_sf.supported_automode_maxfps_list=60,120
 ```
 
-模块本身不会修改或刷写DTBO，也不会在运行时发送MIPI命令。它只负责允许小米修改版 SurfaceFlinger 在60Hz、120Hz两个系统档位使用AUTO策略。
+该属性是小米 MI-SF 的 AUTO最高帧率许可列表：
+
+```text
+60：允许系统60Hz档进入AUTO策略
+120：允许系统120Hz档进入AUTO策略
+```
+
+它只告诉系统哪些最高刷新率档位允许使用AUTO，不会创建新的面板时序，不会直接指定最低刷新率，也不会修改DDIC命令。因此，仅安装模块但没有匹配的DTBO时，系统可能显示 `AUTO 120`，面板真实上限仍受原厂AUTO60命令限制。
+
+### 安装档位
+
+安装时可以通过音量键选择是否保留小米原厂的视频和停止触摸场景切换：
+
+```text
+音量+：保留小米场景切换（默认）
+音量-：关闭小米场景切换，尽量始终保持完整AUTO模式
+10秒内没有按键：自动选择音量+
+```
+
+#### 音量+：保留小米场景切换
+
+音量+档不会添加其他刷新率属性，相关原厂开关保持为 `true`。小米系统可以根据视频、相机和停止触摸等场景，主动离开AUTO模式并选择普通固定60Hz。
+
+优点：
+
+```text
+带弹幕或持续动画的视频页面可能始终被AUTO判断为动态内容
+如果AUTO因此长期保持120Hz，原厂强制60Hz可以降低这类场景的功耗
+保留小米对相机预览、视频节奏和部分白名单应用的原厂调度
+```
+
+缺点：
+
+```text
+普通24/30fps视频也可能被同一策略切换到普通固定60Hz
+固定60Hz不再是1–120Hz AUTO，面板无法在该模式内继续向30/10/1Hz下降
+系统依据应用类型和触摸状态决策，而不完全依据画面是否真的发生变化
+```
+
+该档位适合更看重弹幕、持续动画视频场景功耗，以及希望保留原厂兼容策略的用户。
+
+#### 音量-：尽量始终保持完整AUTO
+
+音量-档会在基础配置后追加：
+
+```properties
+# 禁止MI-SF按视频或相机场景切换到固定物理刷新率
+ro.vendor.display.video_or_camera_fps.support=false
+ro.vendor.mi_sf.video_or_camera_fps.support=false
+
+# 禁止MI-SF在停止触摸后通过setTpIdleFps切换到固定60Hz
+ro.vendor.display.touch.idle.enable=false
+```
+
+各属性的作用如下。
+
+```properties
+# 小米旧命名的视频/相机场景开关
+# false：禁止MI-SF通过setVideoFps主动选择固定物理刷新率
+ro.vendor.display.video_or_camera_fps.support=false
+
+# 小米新命名或兼容入口；当前MI-SF二进制同时包含两个属性名
+# 两项同时设为false，避免另一入口或默认值继续启用setVideoFps
+ro.vendor.mi_sf.video_or_camera_fps.support=false
+
+# 小米停止触摸后的物理模式切换开关
+# false：禁止MI-SF通过setTpIdleFps从AUTO120切到普通固定60Hz
+ro.vendor.display.touch.idle.enable=false
+```
+
+真机日志中确认过两条独立调用链：
+
+```text
+视频场景：setVideoFps → id=1 normal 60Hz
+停止触摸：setTpIdleFps → id=1 normal 60Hz
+```
+
+关闭上述入口后，实测画面刷新表现主要由是否存在真实动态元素决定，而不再仅由“当前是否为视频应用”决定。普通视频可以按内容降到30/40附近；滑动或持续动画仍可升高刷新率。
+
+优点：
+
+```text
+物理面板尽量留在完整1–120Hz AUTO模式
+普通视频不会仅因视频白名单或停止触摸被覆盖成固定60Hz
+应用渲染帧率和面板物理刷新率可以分别决策
+更接近由实际画面动态程度驱动的LTPO行为
+```
+
+缺点：
+
+```text
+弹幕、悬浮动画或其他持续变化元素可能使AUTO长时间保持较高刷新率
+不再使用小米针对部分视频和相机应用设计的固定模式匹配
+不同系统版本的MI-SF实现可能变化，需要重新核对属性和日志
+```
+
+该档位适合更看重完整LTPO能力，并愿意让面板根据实际动态内容自行调节的用户。
+
+### Android通用内容检测不受模块影响
+
+以下属性与音量+、音量−两个档位都没有关系，模块不会写入或覆盖它：
+
+```properties
+ro.surface_flinger.use_content_detection_for_refresh_rate=true
+```
+
+上面的 `true` 是当前实测系统的原厂值，只用于说明测试环境，不是模块配置。无论安装时选择音量+、音量−还是10秒超时，模块生成的 `system.prop` 都不会包含这项属性，系统将继续使用ROM自身的原始值。
+
+该属性用于 Android SurfaceFlinger 分析图层内容和渲染节奏，与小米私有的 `setVideoFps`、`setTpIdleFps` 物理模式强制切换不是同一个入口。
+
+保留它的目的：
+
+```text
+应用仍可按24/30/60fps等真实内容节奏渲染
+SurfaceFlinger仍可进行正常的合成与帧率匹配
+只移除已经确认会覆盖AUTO模式的小米私有切换路径
+```
+
+只有在确认没有触发 `setVideoFps` 和 `setTpIdleFps`，系统仍由通用内容检测直接切换到普通固定模式时，才有必要另外研究是否将其设为 `false`。这不属于当前模块的音量键选项，当前实测也不需要关闭。
+
+### 适用边界
+
+模块本身不会修改或刷写DTBO，也不会在运行时发送MIPI命令。
+
+```text
+只安装模块：修改系统使用AUTO模式的策略许可
+只刷实验DTBO：提供真实1–120Hz AUTO面板命令，但系统策略仍可能离开AUTO
+模块与匹配DTBO同时使用：获得完整AUTO物理模式，并按安装档位选择系统策略
+```
 
 模块源文件位于独立目录：
 
 ```text
 HyperOS3AutoLTPO/module.prop
 HyperOS3AutoLTPO/system.prop
+HyperOS3AutoLTPO/customize.sh
 HyperOS3AutoLTPO/META-INF/com/google/android/update-binary
 HyperOS3AutoLTPO/META-INF/com/google/android/updater-script
 ```
