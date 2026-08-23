@@ -1,6 +1,6 @@
 id=HyperOS3AutoLTPO
 name=HyperOS 3 Auto LTPO
-version=1.1.0
-versionCode=2026082401
+version=1.1.1
+versionCode=2026082402
 author=Mathrix (https://github.com/Dreams-Possible)
 description=启用60/120Hz AUTO，并可选择是否保留小米场景刷新率切换
