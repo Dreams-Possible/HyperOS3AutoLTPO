@@ -1,2 +1,5 @@
-# 允许60Hz和120Hz档启用系统自动刷新率策略
+# 在兼容原厂60Hz AUTO的基础上启用120Hz AUTO
 ro.vendor.mi_sf.supported_automode_maxfps_list=60,120
+
+# 取消低亮度下退出AUTO并锁定普通120Hz的亮度阈值
+persist.vendor.disable_idle_fps.threshold=0

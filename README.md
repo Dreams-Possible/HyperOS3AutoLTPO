@@ -7,7 +7,7 @@
 本仓库包含两个彼此独立的部分：
 
 ```text
-Auto模块：允许系统在60Hz和120Hz档启用AUTO刷新率策略
+Auto模块：在保留原厂60Hz AUTO兼容路径的基础上启用120Hz AUTO
 实验DTBO：补全面板AUTO120的DDIC命令，使真实扫描范围达到1–120Hz
 ```
 
@@ -45,18 +45,52 @@ Panel build ID：0x90
 两个安装档位都会通过 `system.prop` 设置：
 
 ```properties
-# 允许60Hz和120Hz档启用系统自动刷新率策略
+# 在兼容原厂60Hz AUTO的基础上启用120Hz AUTO
 ro.vendor.mi_sf.supported_automode_maxfps_list=60,120
+
+# 取消低亮度下退出AUTO并锁定普通120Hz的亮度阈值
+persist.vendor.disable_idle_fps.threshold=0
 ```
 
-该属性是小米 MI-SF 的 AUTO最高帧率许可列表：
+该属性是小米 MI-SF 的 AUTO 最高帧率许可列表。模块的新增目标是启用 `120Hz AUTO`；列表中继续保留 `60`，是为了兼容系统原有的 AUTO60 逻辑：
 
 ```text
-60：允许系统60Hz档进入AUTO策略
-120：允许系统120Hz档进入AUTO策略
+120：模块新增的主要功能，允许系统120Hz档进入AUTO策略
+60：保留原厂兼容路径，不移除系统已有的60Hz AUTO能力
 ```
 
-它只告诉系统哪些最高刷新率档位允许使用AUTO，不会创建新的面板时序，不会直接指定最低刷新率，也不会修改DDIC命令。因此，仅安装模块但没有匹配的DTBO时，系统可能显示 `AUTO 120`，面板真实上限仍受原厂AUTO60命令限制。
+模块遵循“增加功能、不破坏原有功能”的原则，因此没有把该属性直接改成单独的 `120`。对于只安装模块、没有刷入匹配 DTBO 的用户，保留 `60` 可以继续使用原厂 AUTO60 路径，避免原有自动刷新能力因许可列表被覆盖而丢失。
+
+该属性只告诉系统哪些最高刷新率档位允许使用AUTO，不会创建新的面板时序，不会直接指定最低刷新率，也不会修改DDIC命令。因此，仅安装模块但没有匹配的DTBO时，即使系统显示 `AUTO 120`，面板真实上限仍受原厂AUTO60命令限制；刷入匹配DTBO后，新增的 `120` 许可才会配合面板命令实现真实1–120Hz。
+
+### 低亮度AUTO配置
+
+HyperOS 3 原厂 MI-SF 使用内部面板亮度阈值决定是否允许选择AUTO模式组。当前实测系统的默认阈值为 `528`：
+
+```text
+内部亮度高于528：选择id=0、group=41434112的AUTO 1–120Hz模式
+内部亮度低于528：退出AUTO，选择id=2、group=0的普通固定120Hz模式
+```
+
+模块将阈值设为：
+
+```properties
+# 正常亮屏时内部亮度始终大于0，因此不再触发低亮度固定120Hz分支
+persist.vendor.disable_idle_fps.threshold=0
+```
+
+该配置与音量键选择无关，两种安装档位都会默认启用。它不关闭LTPO、内容帧率检测或触摸升频，只取消低亮度下强制离开AUTO模式的保护阈值。
+
+Xiaomi 13 Ultra、`OS3.0.306.0.WMACNXM` 实测结果：
+
+```text
+SurfaceFlinger重新加载后，MI-SF日志中的阈值由(528)变为(0)
+内部亮度降至15时仍保持fixedMode_group=41434112
+活动模式保持id=0 AUTO，没有切换到id=2普通固定120Hz
+低亮度下1–120Hz LTPO工作正常，未观察到偏色
+```
+
+`persist.vendor.disable_idle_fps.threshold` 在 SurfaceFlinger 初始化时读取，运行期间临时改值不会立即刷新其内存缓存；安装模块后应重启设备。若需恢复原厂行为，卸载模块并重启即可恢复ROM自身的默认阈值。
 
 ### 安装档位
 
