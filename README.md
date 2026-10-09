@@ -1,27 +1,35 @@
 # HyperOS3AutoLTPO
 
-为 Xiaomi 13 Ultra（代号 `ishtar`）补全 HyperOS 3 的 1–120Hz LTPO 能力。
+为 Xiaomi 13 Ultra（ishtar）补全AUTO/LTPO能力。作者：[Dreams-Possible](https://github.com/Dreams-Possible)
 
-作者：[Dreams-Possible](https://github.com/Dreams-Possible)
+## 当前方案入口
 
-本仓库包含两个彼此独立的部分：
+| 部分 | 基线与用途 |
+| --- | --- |
+| Auto模块 | 许可AUTO60/120和可选场景策略；模块源码与ZIP保持现状 |
+| [308双AUTO DTBO](dtbo/OS3.0.308.0.WMACNXM/README.md) | OS3.0.308.0.WMACNXM硬件底包，保留AUTO60并新增AUTO120 |
+| [关闭自动idle](idle-bypass/README.md) | 308硬件底包＋madrid OS4.0.17.0.XEOCNXM框架，SO补丁及属性，独立于模块 |
+
+308双档已在移植实机确认工作；合并SO补丁＋0ms计时器按基本修复、继续日用观察维护。模块源码与ZIP均保持现状，idle方案未加入KSU模块。
+
+本仓库包含模块、版本化DTBO和独立idle方案。以下是现有模块的作用：
 
 ```text
 Auto模块：在保留原厂60Hz AUTO兼容路径的基础上启用120Hz AUTO
 实验DTBO：补全面板AUTO120的DDIC命令，使真实扫描范围达到1–120Hz
 ```
 
-## 实测环境
+## 当前移植实测环境
 
 ```text
 设备：Xiaomi 13 Ultra
 代号：ishtar
 地区：中国版
-系统：HyperOS 3.0
-系统版本：OS3.0.306.0.WMACNXM
-Android：16
+系统：HyperOS 4移植
+硬件底包：OS3.0.308.0.WMACNXM
+上层框架：madrid OS4.0.17.0.XEOCNXM
+底包Android：16
 面板节点：mdss_dsi_m1_42_02_0a_dsc_cmd
-Panel build ID：0x90
 物理分辨率：1440 x 3200
 ```
 
@@ -65,32 +73,9 @@ persist.vendor.disable_idle_fps.threshold=0
 
 ### 低亮度AUTO配置
 
-HyperOS 3 原厂 MI-SF 使用内部面板亮度阈值决定是否允许选择AUTO模式组。当前实测系统的默认阈值为 `528`：
+MI-SF通过内部面板亮度阈值决定是否允许AUTO。目标底包原阈值为528，模块两档均设置 `persist.vendor.disable_idle_fps.threshold=0`，取消低亮度退出AUTO的限制。该值不关闭LTPO、内容检测或触摸升频。
 
-```text
-内部亮度高于528：选择id=0、group=41434112的AUTO 1–120Hz模式
-内部亮度低于528：退出AUTO，选择id=2、group=0的普通固定120Hz模式
-```
-
-模块将阈值设为：
-
-```properties
-# 正常亮屏时内部亮度始终大于0，因此不再触发低亮度固定120Hz分支
-persist.vendor.disable_idle_fps.threshold=0
-```
-
-该配置与音量键选择无关，两种安装档位都会默认启用。它不关闭LTPO、内容帧率检测或触摸升频，只取消低亮度下强制离开AUTO模式的保护阈值。
-
-Xiaomi 13 Ultra、`OS3.0.306.0.WMACNXM` 实测结果：
-
-```text
-SurfaceFlinger重新加载后，MI-SF日志中的阈值由(528)变为(0)
-内部亮度降至15时仍保持fixedMode_group=41434112
-活动模式保持id=0 AUTO，没有切换到id=2普通固定120Hz
-低亮度下1–120Hz LTPO工作正常，未观察到偏色
-```
-
-`persist.vendor.disable_idle_fps.threshold` 在 SurfaceFlinger 初始化时读取，运行期间临时改值不会立即刷新其内存缓存；安装模块后应重启设备。若需恢复原厂行为，卸载模块并重启即可恢复ROM自身的默认阈值。
+该属性在SurfaceFlinger初始化时读取，安装后应重启设备。对于这里的KSU模块属性覆盖，卸载模块并重启即可恢复ROM自身配置；如果ROM本身已加入同名属性，则恢复的是该ROM配置。固件product内的修改需按对应文档回退。
 
 ### 安装档位
 
@@ -104,7 +89,7 @@ SurfaceFlinger重新加载后，MI-SF日志中的阈值由(528)变为(0)
 
 #### 音量+：保留小米场景切换
 
-音量+档不会添加其他刷新率属性，相关原厂开关保持为 `true`。小米系统可以根据视频、相机和停止触摸等场景，主动离开AUTO模式并选择普通固定60Hz。
+音量+档不会添加其他刷新率属性，保留ROM或其他模块的有效开关；它不会主动把开关写为 `true`。小米系统可以根据视频、相机和停止触摸等场景，主动离开AUTO模式并选择普通固定60Hz。
 
 优点：
 
@@ -137,21 +122,7 @@ ro.vendor.mi_sf.video_or_camera_fps.support=false
 ro.vendor.display.touch.idle.enable=false
 ```
 
-各属性的作用如下。
-
-```properties
-# 小米旧命名的视频/相机场景开关
-# false：禁止MI-SF通过setVideoFps主动选择固定物理刷新率
-ro.vendor.display.video_or_camera_fps.support=false
-
-# 小米新命名或兼容入口；当前MI-SF二进制同时包含两个属性名
-# 两项同时设为false，避免另一入口或默认值继续启用setVideoFps
-ro.vendor.mi_sf.video_or_camera_fps.support=false
-
-# 小米停止触摸后的物理模式切换开关
-# false：禁止MI-SF通过setTpIdleFps从AUTO120切到普通固定60Hz
-ro.vendor.display.touch.idle.enable=false
-```
+前两项控制视频/相机场景的旧、新入口，第三项控制停止触摸策略。这些开关不覆盖全部软件idle路径，308＋OS4另需参考独立idle方案。
 
 真机日志中确认过两条独立调用链：
 
@@ -231,191 +202,11 @@ HyperOS3AutoLTPO.zip
 
 ZIP内部直接以 `module.prop`、`system.prop` 和 `META-INF/` 为根，没有额外嵌套模块文件夹，可由 Magisk/KernelSU 模块管理器直接安装。模块仍不会自动刷写DTBO。
 
-## 实验DTBO
+## DTBO资料与部署
 
-```text
-文件：dtbo/ishtar_OS3.0.306.0.WMACNXM_AUTO_1-120Hz_dtbo_a.img
-大小：25165824 bytes
-SHA-256：c121a59d66668d93e5504cdacc0ba9846244fe80a5aa4391e2513fb91c435189
-```
+[308双AUTO构建及镜像](dtbo/OS3.0.308.0.WMACNXM/README.md)为当前308底包方案，保留AUTO60并新增AUTO120。旧版本说明由Git历史保留，当前文档只呈现现行方案。
 
-该文件是完整 `dtbo_a` 分区镜像，不是通用补丁。它以 `OS3.0.306.0.WMACNXM` 当前槽位的原始DTBO为基础，只修改 ishtar M1 面板所在的 DTBO 条目06和07。
-
-不要用于其他机型、其他面板、其他系统版本或未经核对的另一槽位。系统升级后不得默认继续刷入，应重新提取新版DTBO并核对面板节点及原始字节。
-
-## 原厂限制
-
-原厂AUTO节点为：
-
-```text
-timing@wqhd_auto_mode_60_1hz_index_08
-```
-
-原厂虽然允许面板最低下降到1Hz，但AUTO模式的真实最高扫描率被DDIC命令限制在60Hz。单独把以下元数据从60改成120，只会让 SurfaceFlinger 显示 `AUTO 120`，面板硬件仍只能达到60Hz：
-
-```text
-mi,mdss-dsi-sf-framerate
-qcom,mdss-dsi-panel-framerate
-```
-
-因此必须同时修改模式元数据和面板 `26/2F/BA/BC` 命令。
-
-## 成功方案
-
-目标节点在 DTBO 条目06、07中各修改一次：
-
-```text
-timing@wqhd_auto_mode_60_1hz_index_08
-```
-
-### 模式元数据
-
-```text
-mi,mdss-dsi-sf-framerate：60 -> 120
-qcom,mdss-dsi-panel-framerate：60 -> 120
-mi,mdss-dsi-ddic-min-framerate：1 -> 60
-qcom,mdss-dsi-h-sync-skew：0x9e01 -> 0xbc3c
-```
-
-该驱动使用 `h-sync-skew` 同时编码模式类型、SurfaceFlinger刷新率和最低刷新率：
-
-```text
-(AUTO << 14) | (120 << 7) | 60 = 0xbc3c
-```
-
-### 主DDIC命令
-
-`qcom,mdss-dsi-on-command` 和 `qcom,mdss-dsi-timing-switch-command` 同步修改：
-
-```text
-# 使用M1自身普通120Hz的非flat基准
-26 03 -> 26 02
-
-# AUTO刷新参数
-保留第一条 2F 00
-第二条 2F 30 -> 2F 00
-
-# 自适应刷新参数表
-BA 91 0B 03 00 11 77 77 00 05
-->
-BA 91 01 01 00 01 01 01 00 00
-
-# timing-switch中的原厂BA略有不同，也单独替换
-BA 91 0B 01 00 11 77 77 00 05
-->
-BA 91 01 01 00 01 01 01 00 00
-
-# TE基准由60Hz切换为120Hz
-BC 20 -> BC 00
-```
-
-最终工作的核心组合为：
-
-```text
-26 02
-2F 00
-2F 00
-BA 91 01 01 00 01 01 01 00 00
-BC 00
-```
-
-### Flat模式
-
-系统切换flat状态时可能重新写入 `26`，因此同步修改：
-
-```text
-flat关闭：26 03 -> 26 02
-flat开启：26 01 -> 26 00
-Gamma 26映射：<1 3> -> <0 2>
-```
-
-## 生成方式
-
-使用原位二进制补丁，而不是反编译后重新编译整个DTBO：
-
-```text
-1. 校验Android DTBO头和条目表
-2. 只进入条目06、07
-3. 解析条目内部FDT结构块和字符串表
-4. 只匹配目标AUTO节点及指定属性
-5. 每个原值必须精确命中一次
-6. 所有替换保持相同字节长度
-7. 保持条目偏移、条目大小和完整镜像大小不变
-8. 重新提取条目并通过DTC反编译校验
-```
-
-成功镜像相对原始DTBO：
-
-```text
-修改字节总数：52 bytes
-条目06：26 bytes
-条目07：26 bytes
-其他55个条目：完全不变
-镜像大小：完全不变
-```
-
-之所以采用原位补丁，是为了避免重新编译改变属性顺序、字符串表偏移、padding、phandle或DTBO条目布局。
-
-## 真机结果
-
-刷入后 SurfaceFlinger：
-
-```text
-activeMode id=0
-vsyncRate=120Hz
-ddic_mode=2
-sf_fps=120
-ddic_min_fps=60
-```
-
-滑动屏幕时硬件采样：
-
-```text
-dynamic_fps=120
-hw_vsync_info约120Hz
-vsync_period约8.32ms
-```
-
-停止触摸并静止后，开发者刷新率显示确认面板可继续下降到1Hz。因此实际表现是：
-
-```text
-SurfaceFlinger/HWC可见范围：120 -> 60Hz
-DDIC面板实际扫描范围：120 -> 60 -> 1Hz
-```
-
-`ddic_min_fps=60` 是系统/HWC可见的策略下限，不是DDIC面板物理扫描率的硬下限。
-
-## 刷写警告
-
-DTBO是启动链关键分区。错误镜像可能导致黑屏、闪烁、显示异常或无法正常开机。
-
-在进行任何刷写前，必须确认：
-
-```text
-Bootloader已经解锁
-设备确实是ishtar
-面板节点和build ID一致
-当前系统版本一致
-当前活动槽位
-fastboot能够识别并写入设备
-已经备份当前槽位的原始DTBO
-原始镜像与待刷镜像SHA-256正确
-具备明确且可执行的fastboot回滚方案
-```
-
-本仓库不提供自动刷写脚本。请勿把这里的 `dtbo_a` 文件盲目写入 `dtbo_b`，也不要在未确认活动槽位时直接执行命令。
-
-## 参考
-
-寄存器组合参考了小米公开的同属 `42-02-0a` 命令族面板配置，并结合 ishtar M1 原厂普通120Hz、AUTO60、flat模式命令交叉推导：
-
-```text
-https://github.com/MiCode/vendor_qcom_proprietary_display-devicetree
-分支：bsp-zorn-v-oss
-参考：display/dsi-panel-n1-42-02-0a-dsc-cmd.dtsi
-```
-
-最终参数以 Xiaomi 13 Ultra `OS3.0.306.0.WMACNXM` 真机验证结果为准。
+刷写前备份当前活动槽位原DTBO并记录哈希，核对版本和面板，确认fastboot回退路径。部署后结合SurfaceFlinger mode/group、MI-SF/HWC日志及面板扫描节点判定；角标单独不足以证明物理扫描范围。idle补丁、属性与回退方法见[独立文档](idle-bypass/README.md)。
 
 ## License
 
